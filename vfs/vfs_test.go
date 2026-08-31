@@ -527,54 +527,81 @@ func newIDObject(remote, id string, contents []byte) idObject {
 // than from the counter.
 const inodeIDBit = uint64(0x8000000000000000)
 
-func TestDeriveInode(t *testing.T) {
+func TestDeriveInodeGen(t *testing.T) {
 	contents := []byte("mock file content")
 
-	t.Run("SameIDSameInode", func(t *testing.T) {
+	t.Run("SameIDSameInodeAndGen", func(t *testing.T) {
 		// Two distinct objects sharing a backend ID - as happens when the
 		// VFS drops a node and later recreates it from a fresh listing.
 		a := newIDObject("file.txt", "backend-id-1", contents)
 		b := newIDObject("file.txt", "backend-id-1", contents)
-		assert.Equal(t, deriveInode(a), deriveInode(b))
+		inodeA, genA := deriveInodeGen(a)
+		inodeB, genB := deriveInodeGen(b)
+		assert.Equal(t, inodeA, inodeB)
+		assert.Equal(t, genA, genB)
 	})
 
-	t.Run("DifferentIDDifferentInode", func(t *testing.T) {
+	t.Run("DifferentIDDifferentInodeOrGen", func(t *testing.T) {
 		a := newIDObject("a.txt", "backend-id-1", contents)
 		b := newIDObject("b.txt", "backend-id-2", contents)
-		assert.NotEqual(t, deriveInode(a), deriveInode(b))
+		inodeA, genA := deriveInodeGen(a)
+		inodeB, genB := deriveInodeGen(b)
+		assert.True(t, inodeA != inodeB || genA != genB, "inodes or gens should differ for different IDs")
+	})
+
+	t.Run("DifferentIDDifferentGen", func(t *testing.T) {
+		// The gen carries the half of the hash the inode doesn't, so two
+		// objects which collided on the inode would still be told apart.
+		// An inode collision can't be forced here, so check the weaker
+		// property the gen has to hold for that to work.
+		_, genA := deriveInodeGen(newIDObject("a.txt", "backend-id-1", contents))
+		_, genB := deriveInodeGen(newIDObject("b.txt", "backend-id-2", contents))
+		assert.NotEqual(t, genA, genB)
 	})
 
 	t.Run("IDSetsHighBit", func(t *testing.T) {
-		inode := deriveInode(newIDObject("file.txt", "backend-id-1", contents))
+		inode, _ := deriveInodeGen(newIDObject("file.txt", "backend-id-1", contents))
 		assert.Equal(t, inodeIDBit, inode&inodeIDBit)
 	})
 
 	t.Run("EmptyIDUsesCounter", func(t *testing.T) {
 		// fs.Directory requires ID() but backends which have no ID for a
 		// directory return "", so that must fall back to the counter.
-		a := deriveInode(newIDObject("file.txt", "", contents))
-		b := deriveInode(newIDObject("file.txt", "", contents))
-		assert.NotEqual(t, a, b)
-		assert.Zero(t, a&inodeIDBit)
-		assert.Zero(t, b&inodeIDBit)
+		inodeA, genA := deriveInodeGen(newIDObject("file.txt", "", contents))
+		inodeB, genB := deriveInodeGen(newIDObject("file.txt", "", contents))
+		assert.NotEqual(t, inodeA, inodeB)
+		// gens are always zero
+		assert.Zero(t, genA)
+		assert.Zero(t, genB)
+		// high bit is not set for counter-derived inodes
+		assert.Zero(t, inodeA&inodeIDBit)
+		assert.Zero(t, inodeB&inodeIDBit)
 	})
 
 	t.Run("NoIDerUsesCounter", func(t *testing.T) {
 		// A backend which doesn't implement fs.IDer at all
-		a := deriveInode(mockobject.New("file.txt"))
-		b := deriveInode(mockobject.New("file.txt"))
-		assert.NotEqual(t, a, b)
-		assert.Zero(t, a&inodeIDBit)
-		assert.Zero(t, b&inodeIDBit)
+		inodeA, genA := deriveInodeGen(mockobject.New("file.txt"))
+		inodeB, genB := deriveInodeGen(mockobject.New("file.txt"))
+		assert.NotEqual(t, inodeA, inodeB)
+		// gens are always zero
+		assert.Zero(t, genA)
+		assert.Zero(t, genB)
+		// high bit is not set for counter-derived inodes
+		assert.Zero(t, inodeA&inodeIDBit)
+		assert.Zero(t, inodeB&inodeIDBit)
 	})
 
 	t.Run("NilEntryUsesCounter", func(t *testing.T) {
 		// newFile is called with a nil object for files being created
-		a := deriveInode(nil)
-		b := deriveInode(nil)
-		assert.NotEqual(t, a, b)
-		assert.Zero(t, a&inodeIDBit)
-		assert.Zero(t, b&inodeIDBit)
+		inodeA, genA := deriveInodeGen(nil)
+		inodeB, genB := deriveInodeGen(nil)
+		assert.NotEqual(t, inodeA, inodeB)
+		// gens are always zero
+		assert.Zero(t, genA)
+		assert.Zero(t, genB)
+		// high bit is not set for counter-derived inodes
+		assert.Zero(t, inodeA&inodeIDBit)
+		assert.Zero(t, inodeB&inodeIDBit)
 	})
 }
 

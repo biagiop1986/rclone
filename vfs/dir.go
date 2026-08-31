@@ -27,6 +27,7 @@ type Dir struct {
 	aux                      // values attached by users of the VFS
 	vfs          *VFS        // read only
 	inode        uint64      // read only: inode number
+	gen          uint64      // read only: generation number
 	f            fs.Fs       // read only
 	cleanupTimer *time.Timer // read only: timer to call cacheCleanup
 
@@ -57,6 +58,7 @@ const (
 )
 
 func newDir(vfs *VFS, f fs.Fs, parent *Dir, fsDir fs.Directory) *Dir {
+	inode, gen := deriveInodeGen(fsDir)
 	d := &Dir{
 		vfs:     vfs,
 		f:       f,
@@ -64,7 +66,8 @@ func newDir(vfs *VFS, f fs.Fs, parent *Dir, fsDir fs.Directory) *Dir {
 		entry:   fsDir,
 		path:    fsDir.Remote(),
 		modTime: fsDir.ModTime(vfs.ctx),
-		inode:   deriveInode(fsDir),
+		inode:   inode,
+		gen:     gen,
 		items:   make(map[string]Node),
 	}
 	// Set timer up like this to avoid race of d.cacheCleanup being called
@@ -184,6 +187,11 @@ func (d *Dir) Path() (name string) {
 // Inode returns the inode number - satisfies Node interface
 func (d *Dir) Inode() uint64 {
 	return d.inode
+}
+
+// Gen returns the generation number - satisfies Node interface
+func (d *Dir) Gen() uint64 {
+	return d.gen
 }
 
 // Node returns the Node associated with this - satisfies Noder interface

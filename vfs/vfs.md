@@ -472,6 +472,17 @@ Because the inode number follows the object's ID rather than its path,
 renaming a file keeps its inode number on backends where the ID is
 itself stable across renames.
 
+Where the inode number is derived by hashing an ID, the other half of
+the hash becomes a generation number, which the FUSE protocol carries
+alongside the inode number and which forms part of the file handle an
+NFS server hands out. Two objects whose hashed inode numbers happened
+to collide are still told apart by it. Objects whose inode number is
+not hashed - taken directly from the backend, or allocated
+sequentially - are given a generation number of zero, as those numbers
+are already unique.
+Generation numbers are not visible to programs reading the mount, which
+see only the inode number.
+
 ### VFS Metadata
 
 If you use the `--vfs-metadata-extension` flag you can get the VFS to

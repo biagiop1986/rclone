@@ -42,6 +42,7 @@ import (
 type File struct {
 	aux                   // values attached by users of the VFS
 	inode uint64          // inode number - read only
+	gen   uint64          // generation number - read only
 	size  atomic.Int64    // size of file
 	ctx   context.Context // context for VFS operations - read only
 
@@ -65,12 +66,14 @@ type File struct {
 //
 // o may be nil
 func newFile(d *Dir, dPath string, o fs.Object, leaf string) *File {
+	inode, gen := deriveInodeGen(o)
 	f := &File{
 		d:     d,
 		dPath: dPath,
 		o:     o,
 		leaf:  leaf,
-		inode: deriveInode(o),
+		inode: inode,
+		gen:   gen,
 		ctx:   d.vfs.ctx,
 	}
 	if o != nil {
@@ -187,6 +190,11 @@ func (f *File) CachePath() string {
 // Inode returns the inode number - satisfies Node interface
 func (f *File) Inode() uint64 {
 	return f.inode
+}
+
+// Gen returns the generation number - satisfies Node interface
+func (f *File) Gen() uint64 {
+	return f.gen
 }
 
 // Node returns the Node associated with this - satisfies Noder interface
