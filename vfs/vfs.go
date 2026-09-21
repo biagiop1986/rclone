@@ -495,6 +495,14 @@ func newInode() (inode uint64) {
 // If the backend does not support IDs, it falls back to a volatile atomic counter.
 func deriveInodeGen(entry fs.DirEntry) (uint64, uint64) {
 	if entry != nil {
+		// A backend with a genuine unique 64-bit id gives the strongest
+		// identity available: no hashing, so no collisions, and the same
+		// value after a restart. Used directly as the inode number.
+		if inoer, ok := entry.(fs.Inoer); ok {
+			if ino := inoer.Ino(); ino > 1 {
+				return ino, 0
+			}
+		}
 		if ider, ok := entry.(fs.IDer); ok {
 			if id := ider.ID(); id != "" {
 				sum := md5.Sum([]byte(id))
@@ -506,8 +514,14 @@ func deriveInodeGen(entry fs.DirEntry) (uint64, uint64) {
 		}
 	}
 	// the range of possible values is restricted to the lower half of
-	// the uint64 range to avoid collisions with the backend ID hash
-	return newInode() & 0x7FFFFFFFFFFFFFFF, 0
+	// the uint64 range to avoid collisions with the backend ID hash.
+	//
+	// 0 and 1 are skipped: the FUSE protocol reserves nodeid 0, and
+	// nodeid 1 is the mount root, which the kernel rejects with EIO on
+	// any non-root node. These only matter where the inode number is
+	// used as the nodeid, but they cost nothing to avoid.
+	const firstUsableInode = 2
+	return (newInode() & 0x7FFFFFFFFFFFFFFF) + firstUsableInode, 0
 }
 
 // Stat finds the Node by path starting from the root

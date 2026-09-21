@@ -163,6 +163,22 @@ type MimeTyper interface {
 	MimeType(ctx context.Context) string
 }
 
+// Inoer is an optional interface for Object and Directory, implemented by
+// backends whose objects carry a unique 64-bit identifier.
+//
+// It is distinct from IDer, whose ID is an opaque string that has to be
+// hashed down to an inode number, with the collision risk that implies.
+// A backend implements Inoer only when it can guarantee the value is
+// unique among live objects and stable for the object's lifetime, in
+// which case it is used as the inode number directly.
+//
+// Values below 2 must not be returned: the FUSE protocol reserves 0, and
+// 1 is the mount root.
+type Inoer interface {
+	// Ino returns the object's unique 64-bit identifier.
+	Ino() uint64
+}
+
 // IDer is an optional interface for Object
 type IDer interface {
 	// ID returns the ID of the Object if known, or "" if not
