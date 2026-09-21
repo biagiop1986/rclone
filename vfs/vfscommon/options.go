@@ -175,6 +175,11 @@ var OptionsInfo = fs.Options{{
 	Default: "",
 	Help:    "Set the extension to read metadata from.",
 	Groups:  "VFS",
+}, {
+	Name:    "vfs_eager_create",
+	Default: false,
+	Help:    "Create the object on the backend as soon as the file is created.",
+	Groups:  "VFS",
 }}
 
 func init() {
@@ -216,6 +221,7 @@ type Options struct {
 	DiskSpaceTotalSize fs.SizeSuffix `config:"vfs_disk_space_total_size"`
 	HandleCaching      fs.Duration   `config:"vfs_handle_caching"`     // time to keep handle alive after last close
 	MetadataExtension  string        `config:"vfs_metadata_extension"` // if set respond to files with this extension with metadata
+	EagerCreate        bool          `config:"vfs_eager_create"`       // if set create the object on the backend when the file is created
 }
 
 // Opt is the default options modified by the environment variables and command line flags

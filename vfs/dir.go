@@ -1,6 +1,7 @@
 package vfs
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -1057,7 +1058,42 @@ func (d *Dir) Create(name string, flags int) (*File, error) {
 		return nil, err
 	}
 	// This gets added to the directory when the file is opened for write
+	if d.vfs.Opt.EagerCreate {
+		o, err := d.eagerCreate(name)
+		if err != nil {
+			return nil, err
+		}
+		return newFile(d, d.Path(), o, name), nil
+	}
 	return newFile(d, d.Path(), nil, name), nil
+}
+
+// eagerCreate materialises the object on the backend immediately, as an empty
+// file, so that the new File can take its identity from the backend rather
+// than from the in-process counter.
+//
+// A File's inode number is chosen once, when the File is constructed, and is
+// never revised afterwards. Created without a backend object there is nothing
+// to derive it from, so it falls back to the counter; the real backend id
+// only appears later, when the node is discarded and rebuilt from a listing.
+// Where the mount is re-exported over NFS that is not a cosmetic difference:
+// the inode number is also the FUSE nodeid, which the kernel embeds in every
+// file handle it hands out, and handles outlive the process that issued them.
+// A handle minted during that window names a counter value which, after a
+// restart, has been reissued to some other file.
+//
+// Creating the object now costs one round trip per file created and makes the
+// identity final before the kernel is told anything. The content still goes
+// up at flush, as an update of this object.
+func (d *Dir) eagerCreate(name string) (fs.Object, error) {
+	remote := path.Join(d.Path(), name)
+	src := object.NewStaticObjectInfo(remote, time.Now(), 0, true, nil, d.f)
+	o, err := d.f.Put(d.vfs.ctx, bytes.NewReader(nil), src)
+	if err != nil {
+		fs.Errorf(d, "Dir.Create: failed to create %q on the backend: %v", name, err)
+		return nil, err
+	}
+	return o, nil
 }
 
 // Mkdir creates a new directory
