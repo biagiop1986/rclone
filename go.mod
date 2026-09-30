@@ -46,7 +46,7 @@ require (
 	github.com/go-git/go-billy/v5 v5.9.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
-	github.com/hanwen/go-fuse/v2 v2.10.1
+	github.com/hanwen/go-fuse/v2 v2.12.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/internxt/rclone-adapter v0.0.0-20260904121407-404a75f3d031
 	github.com/jcmturner/gokrb5/v8 v8.4.4
