@@ -488,6 +488,25 @@ func newInode() (inode uint64) {
 	return inodeCount.Add(1)
 }
 
+// deriveInode returns the inode number for entry: the backend's own 64-bit
+// id when it has one (see fs.Inoer), otherwise a number from the counter,
+// which lasts only as long as the node it was given to.
+//
+// TODO: the counter shares the range with backend ids, so the two can
+// collide when a backend identifies some of its entries and not others.
+func deriveInode(entry fs.DirEntry) uint64 {
+	if inoer, ok := entry.(fs.Inoer); ok {
+		if ino := inoer.Ino(); ino > 1 {
+			return ino
+		}
+	}
+	// 0 and 1 are skipped: the FUSE protocol reserves nodeid 0, and
+	// nodeid 1 is the mount root, which the kernel rejects with EIO on
+	// any non-root node. These only matter where the inode number is
+	// used as the nodeid, but they cost nothing to avoid.
+	return newInode() + 1
+}
+
 // Stat finds the Node by path starting from the root
 //
 // It is the equivalent of os.Stat - Node contains the os.FileInfo
