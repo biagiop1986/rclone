@@ -175,6 +175,8 @@ func mountOptions(fsys *FS, f fs.Fs, opt *mountlib.Options) (mountOpts *fuse.Mou
 			"noappledouble",
 		)
 	}
+	enableNFSExport(mountOpts)
+
 	mountOpts.Options = opts
 	return mountOpts
 }
@@ -213,6 +215,11 @@ func mount(VFS *vfs.VFS, mountpoint string, opt *mountlib.Options) (<-chan error
 	//conn := fusefs.NewFileSystemConnector(nodeFs.Root(), mOpts)
 	mountOpts := mountOptions(fsys, f, opt)
 
+	root, err := fsys.Root()
+	if err != nil {
+		return nil, nil, "", err
+	}
+
 	// FIXME fill out
 	opts := fusefs.Options{
 		MountOptions: *mountOpts,
@@ -220,11 +227,20 @@ func mount(VFS *vfs.VFS, mountpoint string, opt *mountlib.Options) (<-chan error
 		AttrTimeout:  (*time.Duration)(&opt.AttrTimeout),
 		GID:          VFS.Opt.GID,
 		UID:          VFS.Opt.UID,
-	}
 
-	root, err := fsys.Root()
-	if err != nil {
-		return nil, nil, "", err
+		// Use StableAttr.Ino as the kernel nodeid, so the id inside an
+		// NFS file handle derives from the backend's identity rather
+		// than a per-process counter.
+		ExternalNodeID: true,
+
+		// Without this the root's StableAttr.Ino stays 0, and go-fuse
+		// overrides whatever Getattr reports with it, so the mount root
+		// stat()s as inode 0 and ".." in every top-level directory is
+		// unusable.
+		RootStableAttr: &fusefs.StableAttr{
+			Mode: fuse.S_IFDIR,
+			Ino:  root.node.Inode(),
+		},
 	}
 
 	rawFS := fusefs.NewNodeFS(root, &opts)

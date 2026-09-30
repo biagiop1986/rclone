@@ -507,6 +507,37 @@ func deriveInode(entry fs.DirEntry) uint64 {
 	return newInode() + 1
 }
 
+// FindByInode returns the node with this inode number, or nil if no node
+// in the directory cache has it.
+//
+// Only nodes already in memory are considered: this runs while the kernel
+// is blocked resolving an NFS filehandle, so it must not list the backend.
+// A node that has been evicted from the directory cache is therefore not
+// found, and the caller should treat that as ESTALE.
+func (vfs *VFS) FindByInode(inode uint64) (found Node) {
+	if vfs.root == nil {
+		return nil
+	}
+	vfs.root.walk(func(d *Dir) {
+		// d.mu is held by walk here, and neither Dir.Inode nor
+		// File.Inode takes a lock.
+		if found != nil {
+			return
+		}
+		if d.inode == inode {
+			found = d
+			return
+		}
+		for _, node := range d.items {
+			if node.Inode() == inode {
+				found = node
+				return
+			}
+		}
+	})
+	return found
+}
+
 // Stat finds the Node by path starting from the root
 //
 // It is the equivalent of os.Stat - Node contains the os.FileInfo
