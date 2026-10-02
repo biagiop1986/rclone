@@ -13,6 +13,7 @@ type Dir struct {
 	size    int64     // size of directory and contents or -1 if unknown
 	items   int64     // number of objects or -1 for unknown
 	id      string    // optional ID
+	ino     uint64    // optional unique 64-bit id - 0 for unknown
 	parent  string    // optional parent directory ID
 }
 
@@ -38,7 +39,16 @@ func NewDirCopy(ctx context.Context, d Directory) *Dir {
 		size:    d.Size(),
 		items:   d.Items(),
 		id:      d.ID(),
+		ino:     dirIno(d),
 	}
+}
+
+// dirIno returns d's unique 64-bit id if it has one, or 0
+func dirIno(d Directory) uint64 {
+	if inoer, ok := d.(Inoer); ok {
+		return inoer.Ino()
+	}
+	return 0
 }
 
 // Fs returns the Fs that this directory is part of
@@ -70,6 +80,19 @@ func (d *Dir) ID() string {
 // SetID sets the optional ID
 func (d *Dir) SetID(id string) *Dir {
 	d.id = id
+	return d
+}
+
+// Ino returns the optional unique 64-bit id, or 0 if unknown, implementing
+// Inoer
+func (d *Dir) Ino() uint64 {
+	return d.ino
+}
+
+// SetIno sets the optional unique 64-bit id, which must satisfy the
+// Inoer contract
+func (d *Dir) SetIno(ino uint64) *Dir {
+	d.ino = ino
 	return d
 }
 
@@ -122,4 +145,5 @@ func (d *Dir) SetItems(items int64) *Dir {
 var (
 	_ DirEntry  = (*Dir)(nil)
 	_ Directory = (*Dir)(nil)
+	_ Inoer     = (*Dir)(nil)
 )
