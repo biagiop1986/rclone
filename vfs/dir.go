@@ -1088,6 +1088,28 @@ func (d *Dir) eagerCreate(name string) (fs.Object, error) {
 	return o, nil
 }
 
+// mkdir creates the directory at path on the backend and returns its entry.
+//
+// The entry is the one the backend returns when it supports MkdirMetadata, so
+// it carries the backend's identity (ID, Ino) from the start, and the new Dir
+// gets the same inode number it will have once listed. Otherwise it is a plain
+// entry with no identity, and the inode number comes from the counter until
+// the directory is next listed.
+func (d *Dir) mkdir(path string) (fs.Directory, error) {
+	if do := d.f.Features().MkdirMetadata; do != nil {
+		fsDir, err := do(d.vfs.ctx, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		if fsDir != nil {
+			return fsDir, nil
+		}
+	} else if err := d.f.Mkdir(d.vfs.ctx, path); err != nil {
+		return nil, err
+	}
+	return fs.NewDir(path, time.Now()), nil
+}
+
 // Mkdir creates a new directory
 func (d *Dir) Mkdir(name string) (*Dir, error) {
 	if d.vfs.Opt.ReadOnly {
@@ -1110,12 +1132,11 @@ func (d *Dir) Mkdir(name string) (*Dir, error) {
 		return nil, err
 	}
 	// fs.Debugf(path, "Dir.Mkdir")
-	err = d.f.Mkdir(d.vfs.ctx, path)
+	fsDir, err := d.mkdir(path)
 	if err != nil {
 		fs.Errorf(d, "Dir.Mkdir failed to create directory: %v", err)
 		return nil, err
 	}
-	fsDir := fs.NewDir(path, time.Now())
 	dir := newDir(d.vfs, d.f, d, fsDir)
 	d.addObject(dir)
 	if err = d.SetModTime(time.Now()); err != nil {
