@@ -3,6 +3,7 @@ package vfs
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fstest/mockfs"
@@ -91,5 +92,69 @@ func TestFileInodeAfterForget(t *testing.T) {
 	t.Run("WithoutID", func(t *testing.T) {
 		before, after := inodeAfterForget(t, mockobject.New("file.txt").WithContent([]byte("x"), mockobject.SeekModeNone))
 		assert.NotEqual(t, before, after)
+	})
+}
+
+// mkdirFs is a mockfs on which Mkdir succeeds.
+type mkdirFs struct {
+	*mockfs.Fs
+}
+
+func (f *mkdirFs) Mkdir(ctx context.Context, dir string) error { return nil }
+
+// Features recomputes the features for the wrapper rather than the mockfs
+// inside it, so that the methods the wrapper adds are seen.
+func (f *mkdirFs) Features() *fs.Features {
+	return (&fs.Features{}).Fill(context.Background(), f)
+}
+
+// mkdirMetadataFs also implements MkdirMetadata, returning a directory that
+// carries a backend id.
+type mkdirMetadataFs struct {
+	mkdirFs
+	ino uint64
+}
+
+func (f *mkdirMetadataFs) MkdirMetadata(ctx context.Context, dir string, metadata fs.Metadata) (fs.Directory, error) {
+	return fs.NewDir(dir, time.Now()).SetIno(f.ino), nil
+}
+
+func (f *mkdirMetadataFs) Features() *fs.Features {
+	return (&fs.Features{}).Fill(context.Background(), f)
+}
+
+// A directory made through the VFS takes its inode number from the entry the
+// backend returns, when it can return one, rather than from the counter.
+func TestDirMkdirInode(t *testing.T) {
+	mkdir := func(t *testing.T, f fs.Fs, names ...string) (inodes []uint64) {
+		vfs := New(context.Background(), f, nil)
+		t.Cleanup(func() { cleanupVFS(t, vfs) })
+		root, err := vfs.Root()
+		require.NoError(t, err)
+		for _, name := range names {
+			dir, err := root.Mkdir(name)
+			require.NoError(t, err)
+			inodes = append(inodes, dir.Inode())
+		}
+		return inodes
+	}
+	newMock := func(t *testing.T) *mockfs.Fs {
+		f, err := mockfs.NewFs(context.Background(), "test", "root", nil)
+		require.NoError(t, err)
+		return f.(*mockfs.Fs)
+	}
+
+	t.Run("MkdirMetadata", func(t *testing.T) {
+		f := &mkdirMetadataFs{mkdirFs: mkdirFs{newMock(t)}, ino: 4242}
+		assert.Equal(t, []uint64{4242}, mkdir(t, f, "new"))
+	})
+
+	// Without MkdirMetadata there is no identity to take, so each new
+	// directory gets its own number from the counter.
+	t.Run("MkdirOnly", func(t *testing.T) {
+		f := &mkdirFs{newMock(t)}
+		require.Nil(t, f.Features().MkdirMetadata)
+		inodes := mkdir(t, f, "a", "b")
+		assert.NotEqual(t, inodes[0], inodes[1])
 	})
 }
