@@ -519,6 +519,56 @@ func newInode() (inode uint64) {
 	return inodeCount.Add(1)
 }
 
+// deriveInode returns the inode number for entry: the backend's own 64-bit
+// id when it has one (see fs.Inoer), otherwise a number from the counter,
+// which lasts only as long as the node it was given to.
+//
+// TODO: the counter shares the range with backend ids, so the two can
+// collide when a backend identifies some of its entries and not others.
+func deriveInode(entry fs.DirEntry) uint64 {
+	if inoer, ok := entry.(fs.Inoer); ok {
+		if ino := inoer.Ino(); ino > 1 {
+			return ino
+		}
+	}
+	// 0 and 1 are skipped: the FUSE protocol reserves nodeid 0, and
+	// nodeid 1 is the mount root, which the kernel rejects with EIO on
+	// any non-root node. These only matter where the inode number is
+	// used as the nodeid, but they cost nothing to avoid.
+	return newInode() + 1
+}
+
+// FindByInode returns the node with this inode number, or nil if no node
+// in the directory cache has it.
+//
+// Only nodes already in memory are considered: this runs while the kernel
+// is blocked resolving an NFS filehandle, so it must not list the backend.
+// A node that has been evicted from the directory cache is therefore not
+// found, and the caller should treat that as ESTALE.
+func (vfs *VFS) FindByInode(inode uint64) (found Node) {
+	if vfs.root == nil {
+		return nil
+	}
+	vfs.root.walk(func(d *Dir) {
+		// d.mu is held by walk here, and neither Dir.Inode nor
+		// File.Inode takes a lock.
+		if found != nil {
+			return
+		}
+		if d.inode == inode {
+			found = d
+			return
+		}
+		for _, node := range d.items {
+			if node.Inode() == inode {
+				found = node
+				return
+			}
+		}
+	})
+	return found
+}
+
 // Stat finds the Node by path starting from the root
 //
 // It is the equivalent of os.Stat - Node contains the os.FileInfo

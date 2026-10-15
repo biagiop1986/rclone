@@ -1,6 +1,7 @@
 package vfs
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -65,7 +66,7 @@ func newDir(vfs *VFS, f fs.Fs, parent *Dir, fsDir fs.Directory) *Dir {
 		entry:   fsDir,
 		path:    fsDir.Remote(),
 		modTime: fsDir.ModTime(vfs.ctx),
-		inode:   newInode(),
+		inode:   deriveInode(fsDir),
 		items:   make(map[string]Node),
 	}
 	// Set timer up like this to avoid race of d.cacheCleanup being called
@@ -1073,7 +1074,64 @@ func (d *Dir) Create(name string, flags int) (*File, error) {
 		return nil, err
 	}
 	// This gets added to the directory when the file is opened for write
+	if d.vfs.Opt.EagerCreate {
+		o, err := d.eagerCreate(name)
+		if err != nil {
+			return nil, err
+		}
+		return newFile(d, d.Path(), o, name), nil
+	}
 	return newFile(d, d.Path(), nil, name), nil
+}
+
+// eagerCreate materialises the object on the backend immediately, as an empty
+// file, so that the new File can take its identity from the backend rather
+// than from the in-process counter.
+//
+// A File's inode number is chosen once, when the File is constructed, and is
+// never revised afterwards. Created without a backend object there is nothing
+// to derive it from, so it falls back to the counter; the real backend id
+// only appears later, when the node is discarded and rebuilt from a listing.
+// Where the mount is re-exported over NFS that is not a cosmetic difference:
+// the inode number is also the FUSE nodeid, which the kernel embeds in every
+// file handle it hands out, and handles outlive the process that issued them.
+// A handle minted during that window names a counter value which, after a
+// restart, has been reissued to some other file.
+//
+// Creating the object now costs one round trip per file created and makes the
+// identity final before the kernel is told anything. The content still goes
+// up at flush, as an update of this object.
+func (d *Dir) eagerCreate(name string) (fs.Object, error) {
+	remote := path.Join(d.Path(), name)
+	src := object.NewStaticObjectInfo(remote, time.Now(), 0, true, nil, d.f)
+	o, err := d.f.Put(d.vfs.ctx, bytes.NewReader(nil), src)
+	if err != nil {
+		fs.Errorf(d, "Dir.Create: failed to create %q on the backend: %v", name, err)
+		return nil, err
+	}
+	return o, nil
+}
+
+// mkdir creates the directory at path on the backend and returns its entry.
+//
+// The entry is the one the backend returns when it supports MkdirMetadata, so
+// it carries the backend's identity (ID, Ino) from the start, and the new Dir
+// gets the same inode number it will have once listed. Otherwise it is a plain
+// entry with no identity, and the inode number comes from the counter until
+// the directory is next listed.
+func (d *Dir) mkdir(path string) (fs.Directory, error) {
+	if do := d.f.Features().MkdirMetadata; do != nil {
+		fsDir, err := do(d.vfs.ctx, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		if fsDir != nil {
+			return fsDir, nil
+		}
+	} else if err := d.f.Mkdir(d.vfs.ctx, path); err != nil {
+		return nil, err
+	}
+	return fs.NewDir(path, time.Now()), nil
 }
 
 // Mkdir creates a new directory
@@ -1103,12 +1161,11 @@ func (d *Dir) Mkdir(name string) (*Dir, error) {
 		return nil, err
 	}
 	// fs.Debugf(path, "Dir.Mkdir")
-	err = d.f.Mkdir(d.vfs.ctx, path)
+	fsDir, err := d.mkdir(path)
 	if err != nil {
 		fs.Errorf(d, "Dir.Mkdir failed to create directory: %v", err)
 		return nil, err
 	}
-	fsDir := fs.NewDir(path, time.Now())
 	dir := newDir(d.vfs, d.f, d, fsDir)
 	d.addObject(dir)
 	if err = d.SetModTime(time.Now()); err != nil {
